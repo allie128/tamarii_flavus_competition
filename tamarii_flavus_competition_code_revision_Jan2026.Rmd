@@ -1,0 +1,2415 @@
+---
+title: "Figures for tamarii and flavus competition manuscript - revision"
+output: github_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(multcompView)
+library(glmmTMB)
+library(emmeans)
+library(multcompView)
+library(broom)
+library(performance)
+library(lme4)
+
+
+```
+
+## Reading in data for 9 tamarii vs 1 flavus experiments
+
+```{r}
+
+maizeB <- read.csv("./data_for_plots/ExpB_maize_results_wafla.csv")
+maizeC <- read.csv("./data_for_plots/ExpC_maize_results_wafla.csv")
+
+sporesB <- read.csv("./data_for_plots/ExpB_spores_results.csv")
+sporesC <- read.csv("./data_for_plots/ExpC_spores_results.csv")
+
+#filter to only the competition trials
+
+maizeB_comp <- filter(maizeB, Isolate2=="AF13" & Isolate1!="Water")
+maizeC_comp <- filter(maizeC, Isolate2=="AF13" & Isolate1!="Water")
+
+
+maizeB_comp$Dataset <- "B"
+maizeC_comp$Dataset <- "C"
+
+maize_all <- rbind(maizeB_comp, maizeC_comp)
+
+#now for spores
+
+sporesB_comp <- filter(sporesB, Isolate2=="AF13" & Isolate1!="Water")
+sporesC_comp <- filter(sporesC, Isolate2=="AF13" & Isolate1!="Water")
+
+
+sporesB_comp$Dataset <- "B"
+sporesC_comp$Dataset <- "C"
+
+spores_all <- rbind(sporesB_comp, sporesC_comp)
+
+```
+
+ok now let's try plotting
+
+
+```{r}
+#starting with a summary
+
+maize_summary <- maize_all %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_percent = mean(percent_tam, na.rm = TRUE),
+    se_percent   = sd(percent_tam, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+spores_summary <- spores_all %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_percent = mean(percent_tam, na.rm = TRUE),
+    se_percent   = sd(percent_tam, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+maize_summary <- maize_summary %>%
+  mutate(Type = "Mycelia")
+
+spores_summary <- spores_summary %>%
+  mutate(Type = "Conidia")
+
+combined_summary <- bind_rows(maize_summary, spores_summary)
+
+#fix order of mycelia / conidia
+combined_summary$Type <- factor(combined_summary$Type, levels = c("Mycelia", "Conidia"))
+
+#arrange by mycelia values
+ordered_isolates_t <- maize_summary %>%
+  arrange(desc(mean_percent)) %>%
+  pull(Isolate1)
+
+combined_summary$Isolate1 <- factor(combined_summary$Isolate1, levels = ordered_isolates_t)
+
+
+####################
+###NEW FIGURE 6#####
+
+ggplot(combined_summary, aes(x = Isolate1, y = mean_percent, fill = Type)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black", alpha = 0.8) +
+  geom_errorbar(aes(ymin = mean_percent - se_percent,
+                    ymax = mean_percent + se_percent),
+                position = position_dodge(width = 0.8),
+                width = 0.2, color = "black") +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted") +
+  xlab("A. tamarii Isolate") +
+  ylab("Percent A. tamarii") +
+  scale_y_continuous(limits = c(0, 80))+
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  ) +
+  scale_fill_manual(values = c("Mycelia" = "#FFD700", "Conidia" = "#704214"),
+                    name = "Sample Type")
+
+
+#some stats  - see below for new beta modelling
+
+#fix names in maize_f_all for comparisons
+#clean contrast names
+maize_all_formodel<- maize_all
+
+maize_all_formodel$Isolate1 <- maize_all$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+
+#clean contrast names
+spores_all_formodel<- spores_all
+
+spores_all_formodel$Isolate1 <- spores_all$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+
+```
+
+New code for beta modelling of proportions
+
+
+```{r}
+#prepare proportion data
+
+maize_all_formodel$prop_tam <- (maize_all_formodel$percent_tam) / 100
+
+model_beta_tm <- glmmTMB(
+  prop_tam ~ Isolate1 + (1 | Dataset),
+  data = maize_all_formodel,
+  family = beta_family()
+)
+
+#generate data for Table S7
+summary(model_beta_tm)
+r2(model_beta_tm)
+
+emm_beta_tm <- emmeans(model_beta_tm, ~ Isolate1)
+pairs_beta_tm <- contrast(emm_beta_tm, method = "pairwise")
+
+# Get summary of pairwise comparisons
+summary_tm <- summary(pairs_beta_tm)
+
+##TEST
+# Clean contrast names
+summary_tm$contrast <- gsub(" ", "", summary_tm$contrast)
+
+# Assign names and run multcompLetters
+pvals_beta_tm <- summary_tm$p.value
+names(pvals_beta_tm) <- summary_tm$contrast
+
+letters_beta_tm <- multcompLetters(pvals_beta_tm)
+print(letters_beta_tm$Letters)
+
+# Filter to the isolate
+subset_data <- maize_all_formodel %>%
+  filter(Isolate1 == "AZT21S02_C")
+
+# Calculate mean and standard error
+mean_val <- mean(subset_data$percent_tam, na.rm = TRUE)
+se_val <- sd(subset_data$percent_tam, na.rm = TRUE) / sqrt(sum(!is.na(subset_data$percent_tam)))
+
+# Print results
+cat("Mean:", mean_val, "\n")
+cat("Standard Error:", se_val, "\n")
+
+
+
+
+#now do the same for conidia
+
+
+spores_all_formodel$prop_tam <- (spores_all_formodel$percent_tam) / 100
+
+model_beta_ts <- glmmTMB(
+  prop_tam ~ Isolate1 + (1 | Dataset),
+  data = spores_all_formodel,
+  family = beta_family()
+)
+
+#generate data for Table S8
+summary(model_beta_ts)
+r2(model_beta_ts)
+
+emm_beta_ts <- emmeans(model_beta_ts, ~ Isolate1)
+pairs_beta_ts <- contrast(emm_beta_ts, method = "pairwise")
+
+
+
+
+# Get summary of pairwise comparisons
+summary_ts <- summary(pairs_beta_ts)
+
+##TEST
+# Clean contrast names
+summary_ts$contrast <- gsub(" ", "", summary_ts$contrast)
+
+# Assign names and run multcompLetters
+pvals_beta_ts <- summary_ts$p.value
+names(pvals_beta_ts) <- summary_ts$contrast
+
+letters_beta_ts <- multcompLetters(pvals_beta_ts)
+print(letters_beta_ts$Letters)
+
+
+
+# Filter to the isolate
+subset_data <- spores_all_formodel %>%
+  filter(Isolate1 == "AZT21S02_C")
+
+# Calculate mean and standard error
+mean_val <- mean(subset_data$percent_tam, na.rm = TRUE)
+se_val <- sd(subset_data$percent_tam, na.rm = TRUE) / sqrt(sum(!is.na(subset_data$percent_tam)))
+
+# Print results
+cat("Mean:", mean_val, "\n")
+cat("Standard Error:", se_val, "\n")
+
+
+```
+
+
+REPEAT FOR flavus EXPERIMENT E,F,G
+
+```{r}
+maizeE <- read.csv("./data_for_plots/ExpE_maize_results_wafla.csv")
+maizeF <- read.csv("./data_for_plots/ExpF_maize_results_wafla.csv")
+maizeG <- read.csv("./data_for_plots/ExpG_maize_results_wafla.csv")
+
+sporesE <- read.csv("./data_for_plots/ExpE_spores_results.csv")
+sporesF <- read.csv("./data_for_plots/ExpF_spores_results.csv")
+sporesG <- read.csv("./data_for_plots/ExpG_spores_results.csv")
+
+#filter to only the competition trials
+maizeE_comp <- filter(maizeE, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+maizeF_comp <- filter(maizeF, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+maizeG_comp <- filter(maizeG, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+
+maizeE_comp$Dataset <- "E"
+maizeF_comp$Dataset <- "F"
+maizeG_comp$Dataset <- "G"
+
+maize_f_all <- rbind(maizeE_comp, maizeF_comp, maizeG_comp)
+
+
+#now for spores
+sporesE_comp <- filter(sporesE, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+sporesF_comp <- filter(sporesF, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+sporesG_comp <- filter(sporesG, Isolate2=="AZT21S02-C" & Isolate1!="Water")
+
+sporesE_comp$Dataset <- "E"
+sporesF_comp$Dataset <- "F"
+sporesG_comp$Dataset <- "G"
+
+spores_f_all <- rbind(sporesE_comp, sporesF_comp, sporesG_comp)
+
+```
+
+Ok now for the plot
+
+```{r}
+#let's start with a summary
+
+maize_f_summary <- maize_f_all %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_percent = mean(percent_flav, na.rm = TRUE),
+    se_percent   = sd(percent_flav, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+spores_f_summary <- spores_f_all %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_percent = mean(percent_flav, na.rm = TRUE),
+    se_percent   = sd(percent_flav, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+maize_f_summary <- maize_f_summary %>%
+  mutate(Type = "Mycelia")
+
+spores_f_summary <- spores_f_summary %>%
+  mutate(Type = "Conidia")
+
+combined_f_summary <- bind_rows(maize_f_summary, spores_f_summary)
+
+#fix order of mycelia / conidia
+combined_f_summary$Type <- factor(combined_f_summary$Type, levels = c("Mycelia", "Conidia"))
+
+#arrange by mycelia values
+ordered_isolates <- maize_f_summary %>%
+  arrange(desc(mean_percent)) %>%
+  pull(Isolate1)
+
+combined_f_summary$Isolate1 <- factor(combined_f_summary$Isolate1, levels = ordered_isolates)
+
+
+#fix names for final plotting
+combined_f_summary_fixname <- combined_f_summary %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+
+####################
+###NEW FIGURE 7#####
+
+ggplot(combined_f_summary_fixname, aes(x = Isolate1, y = mean_percent, fill = Type)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7, color = "black", alpha = 0.8) +
+  geom_errorbar(aes(ymin = mean_percent - se_percent,
+                    ymax = mean_percent + se_percent),
+                position = position_dodge(width = 0.8),
+                width = 0.2, color = "black") +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted") +
+  xlab("A. flavus Isolate") +
+  ylab("Percent A. flavus") +
+  scale_y_continuous(limits = c(0, 80))+
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  ) +
+  scale_fill_manual(values = c("Mycelia" = "#FFD700", "Conidia" = "#4A5D23"),
+                    name = "Sample Type")
+
+
+
+
+#fix names in maize_f_all for comparisons
+#clean contrast names
+maize_f_all_formodel<- maize_f_all
+
+maize_f_all_formodel$Isolate1 <- maize_f_all$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+
+#and for conidia
+
+#clean contrast names
+spores_f_all_formodel<- spores_f_all
+
+spores_f_all_formodel$Isolate1 <- spores_f_all$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+
+```
+
+New code for beta model for proportions
+
+```{r}
+#prepare proportion data
+
+maize_f_all_formodel$prop_flav <- (maize_f_all_formodel$percent_flav) / 100
+
+model_beta_fm <- glmmTMB(
+  prop_flav ~ Isolate1 + (1 | Dataset),
+  data = maize_f_all_formodel,
+  family = beta_family()
+)
+
+#generate data for Table S9
+summary(model_beta_fm)
+r2(model_beta_fm)
+
+emm_beta_fm <- emmeans(model_beta_fm, ~ Isolate1)
+pairs_beta_fm <- contrast(emm_beta_fm, method = "pairwise")
+# Get summary of pairwise comparisons
+summary_fm <- summary(pairs_beta_fm)
+
+##TEST
+# Clean contrast names
+summary_fm$contrast <- gsub(" ", "", summary_fm$contrast)
+
+# Assign names and run multcompLetters
+pvals_beta_fm <- summary_fm$p.value
+names(pvals_beta_fm) <- summary_fm$contrast
+
+letters_beta_fm <- multcompLetters(pvals_beta_fm)
+print(letters_beta_fm$Letters)
+
+
+#now do the same for conidia
+
+
+spores_f_all_formodel$prop_flav <- (spores_f_all_formodel$percent_flav) / 100
+
+model_beta_fs <- glmmTMB(
+  prop_flav ~ Isolate1 + (1 | Dataset),
+  data = spores_f_all_formodel,
+  family = beta_family()
+)
+
+#generate data for Table S10
+summary(model_beta_fs)
+r2(model_beta_fs)
+
+# Estimated marginal means
+emm_beta_fs <- emmeans(model_beta_fs, ~ Isolate1)
+
+
+pairs_beta_fs <- contrast(emm_beta_fs, method = "pairwise")
+
+# Get summary of pairwise comparisons
+summary_fs <- summary(pairs_beta_fs)
+
+##TEST
+# Clean contrast names
+summary_fs$contrast <- gsub(" ", "", summary_fs$contrast)
+
+# Assign names and run multcompLetters
+pvals_beta_fs <- summary_fs$p.value
+names(pvals_beta_fs) <- summary_fs$contrast
+
+letters_beta_fs <- multcompLetters(pvals_beta_fs)
+print(letters_beta_fs$Letters)
+
+
+```
+
+T-test to see if isolates are significantly different that 50%
+
+```{r}
+# Filter to the isolate
+subset_data <- maize_all_formodel %>%
+  filter(Isolate1 == "AZT21S20_F")
+
+# Run one-sample t-test against 50%
+t.test(subset_data$percent_tam, mu = 50)
+
+
+# Run t-test for each isolate and tidy the output
+#generate data for Table S11
+maize_all_formodel %>%
+  group_by(Isolate1) %>%
+  summarise(t_test = list(t.test(percent_tam, mu = 50)), .groups = "drop") %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+
+#generate data for Table S11
+spores_all_formodel %>%
+  group_by(Isolate1) %>%
+  summarise(t_test = list(t.test(percent_tam, mu = 50)), .groups = "drop") %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+
+#and for flav
+#generate data for Table S13
+maize_f_all_formodel %>%
+  group_by(Isolate1) %>%
+  summarise(t_test = list(t.test(percent_flav, mu = 50)), .groups = "drop") %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+
+#generate data for Table S13
+spores_f_all_formodel %>%
+  group_by(Isolate1) %>%
+  summarise(t_test = list(t.test(percent_flav, mu = 50)), .groups = "drop") %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+
+```
+
+Another T-test to see if proportions of each isolate are equal for conidia/mycelia
+
+
+```{r}
+#prep data
+maize_all <- maize_all %>%
+  mutate(Treatment = "Maize")
+
+spores_all <- spores_all %>%
+  mutate(Treatment = "Spores")
+
+combined_df <- bind_rows(maize_all, spores_all)
+
+
+maize_f_all <- maize_f_all %>%
+  mutate(Treatment = "Maize")
+
+spores_f_all <- spores_f_all %>%
+  mutate(Treatment = "Spores")
+
+combined_df_f <- bind_rows(maize_f_all, spores_f_all)
+
+# Step 1: Reshape so each row has Maize and Spores values
+
+
+wide_df <- combined_df %>%
+  dplyr::select(Isolate1, Dataset, Rep, Treatment, percent_tam) %>%
+  pivot_wider(names_from = Treatment, values_from = percent_tam)
+
+
+# Step 2: Run paired t-tests by Dataset
+#generate data for Table S12
+wide_df %>%
+  group_by(Isolate1) %>%
+  summarise(
+    t_test = list(t.test(Maize, Spores, paired = TRUE)),
+    .groups = "drop"
+  ) %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+
+#and for flavus
+# Step 1: Reshape so each row has Maize and Spores values
+wide_df_f <- combined_df_f %>%
+  dplyr::select(Isolate1, Dataset, Rep, Treatment, percent_flav) %>%
+  pivot_wider(names_from = Treatment, values_from = percent_flav)
+
+
+
+# Step 2: Run paired t-tests by Dataset
+#generate data for Table S14
+wide_df_f %>%
+  group_by(Isolate1) %>%
+  summarise(
+    t_test = list(t.test(Maize, Spores, paired = TRUE)),
+    .groups = "drop"
+  ) %>%
+  mutate(tidy_out = map(t_test, tidy)) %>%
+  unnest(tidy_out) %>%
+  dplyr::select(Isolate1, estimate, statistic, p.value, conf.low, conf.high)
+```
+
+
+Now comparing the correlation between maize vs spores for both tamarii and flavus.
+
+```{r}
+
+#for tamarii
+
+tam_raw_compare <- combined_df %>%
+  dplyr::select(Isolate1, Vial., Dataset, Treatment, avg_tam) %>%
+  pivot_wider(names_from = Treatment, values_from = avg_tam)
+
+
+#fix names for final plotting
+tam_raw_compare_fixname <- tam_raw_compare %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "AZSIL21M32-E" = "SIL21M32-E")
+  )
+
+#############################
+####CODE FOR FIGURE 5(TOP)###
+#############################
+
+#now for one chart with dataset as Experiment
+ggplot(tam_raw_compare_fixname,
+       aes(x     = log(Maize),
+           y     = log(Spores),
+           fill = Isolate1,
+           shape = Dataset)) +        # map Dataset to shape
+  geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "gray50",
+              linewidth=1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(Maize), y = log(Spores)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  scale_fill_colorblind(name = "Isolate") +
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("A" = 21,    # circle
+               "B" = 22,    # triangle
+               "C" = 23)    # square
+  ) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x     = "log(A. tamarii mycelia copy number)",
+    y     = "log(A. tamarii conidia copy number)",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+#get the info for the linear model in the figure
+model <- lm(log(Spores) ~ log(Maize), data = tam_raw_compare_fixname)
+summary(model)
+
+#see how many pts are above and below. 
+# Get fitted values
+fitted_vals <- fitted(model)
+
+# Get observed values
+observed_vals <- log(tam_raw_compare_fixname$Spores)
+
+# Compare
+above <- sum(observed_vals > fitted_vals)
+below <- sum(observed_vals < fitted_vals)
+equal <- sum(observed_vals == fitted_vals)  # optional
+
+# Print results
+cat("Points above the line:", above, "\n")
+cat("Points below the line:", below, "\n")
+
+#see how many outside the CI
+# Get predicted values and 95% confidence intervals
+pred <- predict(model, interval = "confidence")
+
+# Get observed values
+observed <- log(tam_raw_compare_fixname$Spores)
+
+# Count how many are outside the confidence interval
+outside <- sum(observed < pred[, "lwr"] | observed > pred[, "upr"])
+
+# Print result
+cat("Points outside the 95% confidence interval:", outside, "\n")
+
+#look at experiments separately. 
+
+tam_raw_compare_fixname %>%
+  group_by(Dataset) %>%
+  group_modify(~ tidy(lm(log(Spores) ~ log(Maize), data = .x)))
+
+
+
+#for flavus
+
+maize_f_all <- maize_f_all %>%
+  mutate(Treatment = "Maize")
+
+spores_f_all <- spores_f_all %>%
+  mutate(Treatment = "Spores")
+
+combined_df_f <- bind_rows(maize_f_all, spores_f_all)
+
+flav_raw_compare <- combined_df_f %>%
+  dplyr::select(Isolate1, Vial., Dataset, Treatment, avg_flav) %>%
+  pivot_wider(names_from = Treatment, values_from = avg_flav)
+
+
+#fix names for final plotting
+flav_raw_compare_fixname <- flav_raw_compare %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+#################################  
+####CODE FOR FIGURE 5(BOTTOM)####
+#################################
+
+
+#also fixes legend order
+ggplot(flav_raw_compare_fixname,
+       aes(x     = log(Maize),
+           y     = log(Spores),
+           fill = Isolate1,
+           shape = Dataset)) +        # map Dataset to shape
+  geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "gray50",
+              linewidth=1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(Maize), y = log(Spores)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  scale_fill_colorblind(name = "Isolate") +
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("E" = 21,    # circle
+               "F" = 22,    # triangle
+               "G" = 23)    # square
+  ) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      ),
+      order = 1             # Isolate legend first
+    ),
+    shape = guide_legend(order = 2)  # Experiment legend second
+  ) +
+  labs(
+    x     = "log(A. flavus mycelia copy number)",
+    y     = "log(A. flavus conidia copy number)",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+
+#get info for lm in the figure
+
+model_f <- lm(log(Spores) ~ log(Maize), data = flav_raw_compare_fixname)
+summary(model_f)
+
+
+#see how many pts are above and below. 
+# Get fitted values
+fitted_vals_f <- fitted(model_f)
+
+# Get observed values
+observed_vals_f <- log(flav_raw_compare_fixname$Spores)
+
+# Compare
+above <- sum(observed_vals_f > fitted_vals_f)
+below <- sum(observed_vals_f < fitted_vals_f)
+equal <- sum(observed_vals_f == fitted_vals_f)  # optional
+
+# Print results
+cat("Points above the line:", above, "\n")
+cat("Points below the line:", below, "\n")
+
+#see how many outside the CI
+# Get predicted values and 95% confidence intervals
+pred_f <- predict(model_f, interval = "confidence")
+
+# Get observed values
+observed_f <- log(flav_raw_compare_fixname$Spores)
+
+# Count how many are outside the confidence interval
+outside_f <- sum(observed_f < pred_f[, "lwr"] | observed_f > pred_f[, "upr"])
+
+# Print result
+cat("Points outside the 95% confidence interval:", outside, "\n")
+
+#look at experiments separately. 
+
+flav_raw_compare_fixname %>%
+  group_by(Dataset) %>%
+  group_modify(~ tidy(lm(log(Spores) ~ log(Maize), data = .x)))
+
+
+
+```
+
+
+Now to quantify overall reduction in tamarii and flavus due to competition.
+
+
+```{r}
+#add variable for experiment and sample type
+maizeB <- maizeB %>% mutate(Experiment = "B")
+maizeC <- maizeC %>% mutate(Experiment = "C")
+maizeB <- maizeB %>% mutate(SampleType = "maize")
+maizeC <- maizeC %>% mutate(SampleType = "maize")
+
+maizeE <- maizeE %>% mutate(Experiment = "E")
+maizeF <- maizeF %>% mutate(Experiment = "F")
+maizeG <- maizeG %>% mutate(Experiment = "G")
+maizeE <- maizeE %>% mutate(SampleType = "maize")
+maizeF <- maizeF %>% mutate(SampleType = "maize")
+maizeG <- maizeG %>% mutate(SampleType = "maize")
+
+sporesB <- sporesB %>% mutate(Experiment = "B")
+sporesC <- sporesC %>% mutate(Experiment = "C")
+sporesB <- sporesB %>% mutate(SampleType = "spores")
+sporesC <- sporesC %>% mutate(SampleType = "spores")
+
+sporesE <- sporesE %>% mutate(Experiment = "E")
+sporesF <- sporesF %>% mutate(Experiment = "F")
+sporesG <- sporesG %>% mutate(Experiment = "G")
+sporesE <- sporesE %>% mutate(SampleType = "spores")
+sporesF <- sporesF %>% mutate(SampleType = "spores")
+sporesG <- sporesG %>% mutate(SampleType = "spores")
+
+#combine
+data_all_t <- bind_rows(
+  maizeB, maizeC,
+  sporesB, sporesC,
+)
+
+data_all_f <- bind_rows(
+  maizeE, maizeF, maizeG,
+  sporesE, sporesF, sporesG
+)
+
+#tag single and co-inoculated
+data_all_t <- data_all_t %>%
+  mutate(
+    Treatment = case_when(
+      Isolate1 == "Water" & Isolate2 == "Water" ~ "control",
+      Isolate1 != "Water" & Isolate2 == "Water" ~ "singly-inoculated",
+      Isolate1 == "Water" & Isolate2 != "Water" ~ "singly-inoculated",
+      Isolate1 != "Water" & Isolate2 != "Water" ~ "co-inoculated",
+      TRUE ~ NA_character_
+    )
+  )
+
+
+data_all_f <- data_all_f %>%
+  mutate(
+    Treatment = case_when(
+      Isolate1 == "Water" & Isolate2 == "Water" ~ "control",
+      Isolate1 != "Water" & Isolate2 == "Water" ~ "singly-inoculated",
+      Isolate1 == "Water" & Isolate2 != "Water" ~ "singly-inoculated",
+      Isolate1 != "Water" & Isolate2 != "Water" ~ "co-inoculated",
+      TRUE ~ NA_character_
+    )
+  )
+
+#select subsets based on treatment
+tam_solo_m <- filter(data_all_t, Treatment == "singly-inoculated", SampleType=="maize")
+
+tam_solo_s <- filter(data_all_t, Treatment == "singly-inoculated", SampleType=="spores")
+
+flav_solo_m <- filter(data_all_f, Treatment == "singly-inoculated", SampleType=="maize")
+
+flav_solo_s <- filter(data_all_f, Treatment == "singly-inoculated", SampleType=="spores")
+
+tam_co_m <- filter(data_all_t, Treatment == "co-inoculated", SampleType=="maize")
+
+tam_co_s <- filter(data_all_t, Treatment == "co-inoculated", SampleType=="spores")
+
+flav_co_m <- filter(data_all_f, Treatment == "co-inoculated", SampleType=="maize")
+
+flav_co_s <- filter(data_all_f, Treatment == "co-inoculated", SampleType=="spores")
+
+
+#summary mean copy numbers by isolate and experiment
+
+tam_solo_m_summary <- tam_solo_m %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_solo_tam = mean(avg_tam, na.rm = TRUE), .groups = "drop")
+
+
+tam_solo_s_summary <- tam_solo_s %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_solo_tam = mean(avg_tam, na.rm = TRUE), .groups = "drop")
+
+
+flav_solo_m_summary <- flav_solo_m %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_solo_flav = mean(avg_flav, na.rm = TRUE), .groups = "drop")
+
+
+flav_solo_s_summary <- flav_solo_s %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_solo_flav = mean(avg_flav, na.rm = TRUE), .groups = "drop")
+
+
+#calculate avg_flav and avg_tam 
+tam_co_m_summary <- tam_co_m %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_co_flav = mean(avg_flav, na.rm = TRUE),
+            mean_co_tam = mean(avg_tam, na.rm = TRUE),  .groups = "drop")
+
+#drop controls
+tam_co_m_summary <- filter(tam_co_m_summary, Isolate1 != "Water")
+
+
+#calculate for avg_tam and avg_flav
+tam_co_s_summary <- tam_co_s %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_co_flav = mean(avg_flav, na.rm = TRUE),
+            mean_co_tam = mean(avg_tam, na.rm = TRUE), .groups = "drop")
+
+#drop controls
+tam_co_s_summary <- filter(tam_co_s_summary, Isolate1 != "Water")
+
+
+flav_co_m_summary <- flav_co_m %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_co_flav = mean(avg_flav, na.rm = TRUE),
+            mean_co_tam = mean(avg_tam, na.rm = TRUE),    .groups = "drop")
+
+#drop controls
+flav_co_m_summary <- filter(flav_co_m_summary, Isolate1 != "Water")
+
+
+flav_co_s_summary <- flav_co_s %>%
+  group_by(Isolate1, Experiment) %>%
+  summarize(mean_co_flav = mean(avg_flav, na.rm = TRUE),
+            mean_co_tam = mean(avg_tam, na.rm = TRUE),.groups = "drop")
+
+#drop controls
+flav_co_s_summary <- filter(flav_co_s_summary, Isolate1 != "Water")
+
+
+#ok now to compare the average values 
+
+#FOR TAMARII
+#maize
+tam_suppression_m <- left_join(
+  tam_solo_m_summary, tam_co_m_summary,
+  by = c("Isolate1", "Experiment")
+)
+
+#drop controls
+tam_suppression_m <- filter(tam_suppression_m, Isolate1 != "Water")
+#27
+
+
+##CALCULATION OF SUPPRESSION
+##CHANGING TO PERCENT SUPRESSION 8/11/25
+#old
+#tam_suppression_m <- tam_suppression_m %>%
+#  mutate(reduction = 1 - (mean_co / mean_solo))
+
+
+#######################
+######FIGURE 2 TOPL####
+
+
+#MAKE FINAL PLOT FOR TAM SUPPRESSION
+ggplot(tam_suppression_m, 
+       aes(x     = log(mean_solo_tam),
+           y     = log(mean_co_tam),
+           shape = Experiment,    # ← map Experiment to shape
+           fill = Isolate1)) + # ← optional: keep color if you like
+  geom_abline(slope    = 1, 
+              intercept= 0, 
+              linetype = "dashed", 
+              color    = "gray50",
+              linewidth = 1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  
+  # you can pick your own shapes, e.g. circle, triangle, square…
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("B" = 22,  
+               "C" = 23) 
+  ) +
+  
+  # if you want matching color palette
+  scale_fill_colorblind(name = "Isolate") +
+  theme_minimal()+
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x = "Log(Solo Copy Number)",
+    y = "Log(Co-inoculated Copy Number)"
+  ) +
+  geom_smooth(aes(x = log(mean_solo_tam), y = log(mean_co_tam)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  theme(
+    legend.position = "right"
+  )
+
+#get info for lm
+summary(lm(log(mean_co_tam) ~ log(mean_solo_tam), data=tam_suppression_m))
+
+
+#is the slope significantly different than 1?
+
+
+#t-test for significance
+
+t.test(log(tam_suppression_m$mean_co_tam), log(tam_suppression_m$mean_solo_tam), paired = TRUE)
+
+
+#spores
+tam_suppression_s <- left_join(
+  tam_solo_s_summary, tam_co_s_summary,
+  by = c("Isolate1", "Experiment")
+)
+
+
+#drop controls
+tam_suppression_s <- filter(tam_suppression_s, Isolate1 != "Water")
+
+
+##################
+##FIGURE 2 TOP R##
+
+#PLOT FOR SPORES
+ggplot(tam_suppression_s, 
+       aes(x     = log(mean_solo_tam),
+           y     = log(mean_co_tam),
+           shape = Experiment,    # ← map Experiment to shape
+           fill = Isolate1)) + # ← optional: keep color if you like
+  geom_abline(slope    = 1, 
+              intercept= 0, 
+              linetype = "dashed", 
+              color    = "gray50",
+              linewidth = 1.5) +
+  geom_smooth(aes(x = log(mean_solo_tam), y = log(mean_co_tam)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  
+  # you can pick your own shapes, e.g. circle, triangle, square…
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("B" = 22,  
+               "C" = 23) 
+  ) +
+  
+  # if you want matching color palette
+  scale_fill_colorblind(name = "Isolate") +
+  theme_minimal()+
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x = "Log(Solo Copy Number)",
+    y = "Log(Co-inoculated Copy Number)"
+  ) +
+  theme(
+    legend.position = "right"
+  )
+
+#get info for lm
+summary(lm(log(mean_co_tam) ~ log(mean_solo_tam), data=tam_suppression_s))
+
+
+#t-test for significance 
+
+t.test(log(tam_suppression_s$mean_co_tam), log(tam_suppression_s$mean_solo_tam), paired = TRUE)
+
+```
+
+Now we do the same for flavus
+
+```{r}
+#maize
+flav_suppression_m <- left_join(
+  flav_solo_m_summary, flav_co_m_summary,
+  by = c("Isolate1", "Experiment")
+)
+
+#spores
+
+flav_suppression_s <- left_join(
+  flav_solo_s_summary, flav_co_s_summary,
+  by = c("Isolate1", "Experiment")
+)
+
+
+#MAKE FINAL PLOT FOR flav SUPPRESSION
+#rename
+flav_suppression_m_fixname <- flav_suppression_m %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+##############################
+###FIGURE 2 BOTTOM L###########
+
+ggplot(flav_suppression_m_fixname, 
+       aes(x     = log(mean_solo_flav),
+           y     = log(mean_co_flav),
+           shape = Experiment,    # ← map Experiment to shape
+           fill = Isolate1)) + # ← optional: keep color if you like
+  geom_abline(slope    = 1, 
+              intercept= 0, 
+              linetype = "dashed", 
+              color    = "gray50",
+              linewidth = 1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(mean_solo_flav), y = log(mean_co_flav)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  # you can pick your own shapes, e.g. circle, triangle, square…
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("E" = 21,  
+               "F" = 22,  
+               "G" = 23) 
+  ) +
+  
+  # if you want matching color palette
+  scale_fill_colorblind(name = "Isolate") +
+  theme_minimal()+
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x = "Log(Solo Copy Number)",
+    y = "Log(Co-inoculated Copy Number)"
+  ) +
+  theme(
+    legend.position = "right"
+  )
+
+#get info for lm
+summary(lm(log(mean_co_flav) ~ log(mean_solo_flav), data=flav_suppression_m))
+
+#t-test for significance
+
+t.test(log(flav_suppression_m$mean_co_flav), log(flav_suppression_m$mean_solo_flav), paired = TRUE)
+
+
+#now for spores
+
+#MAKE FINAL PLOT FOR flav SUPPRESSION
+#rename
+flav_suppression_s_fixname <- flav_suppression_s %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+##################################
+#####FIGURE 2 BOTTOMR############
+
+ggplot(flav_suppression_s_fixname, 
+       aes(x     = log(mean_solo_flav),
+           y     = log(mean_co_flav),
+           shape = Experiment,    # ← map Experiment to shape
+           fill = Isolate1)) + # ← optional: keep color if you like
+  geom_abline(slope    = 1, 
+              intercept= 0, 
+              linetype = "dashed", 
+              color    = "gray50",
+              linewidth = 1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(mean_solo_flav), y = log(mean_co_flav)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  # you can pick your own shapes, e.g. circle, triangle, square…
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("E" = 21,  
+               "F" = 22,  
+               "G" = 23) 
+  ) +
+  
+  # if you want matching color palette
+  scale_fill_colorblind(name = "Isolate") +
+  theme_minimal()+
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x = "Log(Solo Copy Number)",
+    y = "Log(Co-inoculated Copy Number)"
+  ) +
+  theme(
+    legend.position = "right"
+  )
+
+#get info for lm
+summary(lm(log(mean_co_flav) ~ log(mean_solo_flav), data=flav_suppression_s))
+
+#t-test for significance
+t.test(log(flav_suppression_s$mean_co_flav), log(flav_suppression_s$mean_solo_flav), paired = TRUE)
+
+
+```
+
+
+plots and stats to see if suppression differs by isolates
+
+```{r}
+#first calculate reduction and ratio
+tam_suppression_m <- tam_suppression_m %>%
+  mutate(reduction = (log(mean_solo_tam) - log(mean_co_tam)))
+
+tam_suppression_m <- tam_suppression_m %>%
+  mutate(reduction_ratio = (mean_co_tam / mean_solo_tam))
+
+tam_suppression_s <- tam_suppression_s %>%
+  mutate(reduction = (log(mean_solo_tam) - log(mean_co_tam)))
+
+tam_suppression_s <- tam_suppression_s %>%
+  mutate(reduction_ratio = (mean_co_tam / mean_solo_tam))
+
+reduction_summary_tm <- tam_suppression_m %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_reduction = mean(reduction_ratio, na.rm = TRUE),
+    se_reduction   = sd(reduction_ratio, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )%>%
+  mutate(Type = "mycelia")
+
+reduction_summary_ts <- tam_suppression_s %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_reduction = mean(reduction_ratio, na.rm = TRUE),
+    se_reduction   = sd(reduction_ratio, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(Type = "conidia")
+
+reduction_combined <- bind_rows(reduction_summary_tm, reduction_summary_ts)
+
+
+#reorder for combined
+reduction_combined$Type <- factor(reduction_combined$Type, levels = c("mycelia", "conidia"))
+
+
+##LETS TRY SUPPRESSION INSTEAD OF REDUCTION
+#first calculate reduction
+#new
+tam_suppression_m <- tam_suppression_m %>%
+  mutate(suppression = (1 - (mean_co_tam/ mean_solo_tam)) *100)
+
+tam_suppression_s <- tam_suppression_s %>%
+  mutate(suppression = (1 - (mean_co_tam/ mean_solo_tam)) *100)
+
+suppression_summary_tm <- tam_suppression_m %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_suppression = mean(suppression, na.rm = TRUE),
+    se_suppression   = sd(suppression, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )%>%
+  mutate(Type = "mycelia")
+
+suppression_summary_ts <- tam_suppression_s %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_suppression = mean(suppression, na.rm = TRUE),
+    se_suppression   = sd(suppression, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(Type = "conidia")
+
+suppression_combined <- bind_rows(suppression_summary_tm, suppression_summary_ts)
+
+
+#reorder for combined
+suppression_combined$Type <- factor(suppression_combined$Type, levels = c("mycelia", "conidia"))
+
+
+```
+
+
+Now the same for flavus suppression
+
+```{r}
+
+#first calculate reduction
+#new
+flav_suppression_m <- flav_suppression_m %>%
+  mutate(reduction = (log(mean_solo_flav) - log(mean_co_flav)))
+
+flav_suppression_m <- flav_suppression_m %>%
+  mutate(reduction_ratio = (mean_co_flav / mean_solo_flav))
+
+flav_suppression_s <- flav_suppression_s %>%
+  mutate(reduction = (log(mean_solo_flav) - log(mean_co_flav)))
+
+flav_suppression_s <- flav_suppression_s %>%
+  mutate(reduction_ratio = (mean_co_flav / mean_solo_flav))
+
+reduction_summary_tm <- tam_suppression_m %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_reduction = mean(reduction_ratio, na.rm = TRUE),
+    se_reduction   = sd(reduction_ratio, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )%>%
+  mutate(Type = "mycelia")
+
+reduction_summary_ts <- tam_suppression_s %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_reduction = mean(reduction_ratio, na.rm = TRUE),
+    se_reduction   = sd(reduction_ratio, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(Type = "conidia")
+
+reduction_combined <- bind_rows(reduction_summary_tm, reduction_summary_ts)
+
+
+#reorder for combined
+reduction_combined$Type <- factor(reduction_combined$Type, levels = c("mycelia", "conidia"))
+
+
+
+
+
+
+```
+
+
+stats for the suppression
+
+```{r}
+#first calculate suppression
+#new
+tam_suppression_m <- tam_suppression_m %>%
+  mutate(suppression = (1 - (mean_co_tam/ mean_solo_tam)) *100)
+
+tam_suppression_s <- tam_suppression_s %>%
+  mutate(suppression = (1 - (mean_co_tam/ mean_solo_tam)) *100)
+
+
+#summary
+suppression_summary_tm <- tam_suppression_m %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_suppression = mean(suppression, na.rm = TRUE),
+    se_suppression   = sd(suppression, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )%>%
+  mutate(Type = "mycelia")
+
+suppression_summary_ts <- tam_suppression_s %>%
+  group_by(Isolate1) %>%
+  summarize(
+    mean_suppression = mean(suppression, na.rm = TRUE),
+    se_suppression   = sd(suppression, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(Type = "conidia")
+
+
+###PLOT % suppression 
+
+
+tam_suppression_m <- tam_suppression_m %>% mutate(SampleType = "Maize")
+tam_suppression_s <- tam_suppression_s %>% mutate(SampleType = "Spores")
+tam_suppression_combined <- bind_rows(tam_suppression_m, tam_suppression_s)
+
+#rename for plotting
+tam_suppression_combined_fixname <- tam_suppression_combined %>%
+  mutate(
+    SampleType = recode(SampleType,
+                       "Maize"  = "mycelia",
+                       "Spores" = "conidia")
+  )
+
+# Get the maize-based isolate order
+maize_order_sup_t <- tam_suppression_combined_fixname %>%
+  filter(SampleType == "mycelia") %>%  # Filter to mycelia only
+  group_by(Isolate1) %>%
+  summarize(mean_suppression = mean(suppression, na.rm = TRUE)) %>%
+  arrange(desc(mean_suppression)) %>%
+  pull(Isolate1)
+
+tam_suppression_combined_fixname <- tam_suppression_combined_fixname %>%
+  mutate(Isolate1 = factor(Isolate1, levels = maize_order_sup_t))
+
+# Set 'mycelia' as the first factor level
+tam_suppression_combined_fixname$SampleType <- factor(
+  tam_suppression_combined_fixname$SampleType,
+  levels = c("mycelia", "conidia")
+)
+
+
+```
+
+new plot based using ratios as a measure of suppression
+
+```{r}
+
+# Get the maize-based isolate order
+maize_order_red_t <- tam_suppression_combined_fixname %>%
+  filter(SampleType == "mycelia") %>%  # Filter to mycelia only
+  group_by(Isolate1) %>%
+  summarize(mean_reduction_ratio = mean(reduction_ratio, na.rm = TRUE)) %>%
+  arrange(desc(mean_reduction_ratio)) %>%
+  pull(Isolate1)
+
+tam_suppression_combined_fixname <- tam_suppression_combined_fixname %>%
+  mutate(Isolate1 = factor(Isolate1, levels = maize_order_red_t))
+
+# Set 'mycelia' as the first factor level
+tam_suppression_combined_fixname$SampleType <- factor(
+  tam_suppression_combined_fixname$SampleType,
+  levels = c("mycelia", "conidia")
+)
+
+
+########################
+##FIGURE 3 NEW #########
+
+ggplot(tam_suppression_combined_fixname,
+       aes(x = Isolate1, y = reduction_ratio, fill = SampleType)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  #geom_jitter(aes(color = Experiment),
+          #    width = 0.2, size = 2) +
+  theme_bw() +
+  scale_fill_manual(values = c("mycelia" = "#FFD700", "conidia" = "#704214"),name = "Sample Type") +
+  labs(x = "A. tamarii isolate",
+    y = "Ratio of co-inoculated to solo copy number",
+    fill = "Sample Type",
+    color = "Experiment"
+  ) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+      geom_vline(xintercept = 1.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted")
+
+
+
+#now using a lmer for stats
+#first need to clean names
+#clean contrast names
+tam_suppression_m_for_model <- tam_suppression_m
+
+tam_suppression_m_for_model$Isolate1 <- tam_suppression_m$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+model_tm_logRR <- lmer(log(reduction_ratio) ~ Isolate1 + (1 | Experiment), data = tam_suppression_m_for_model)
+
+#generate data for Table S3
+summary(model_tm_logRR)
+
+
+
+emm_logRR_tm <- emmeans(model_tm_logRR, ~ Isolate1)
+pairs_logRR_tm <- contrast(emm_logRR_tm, method = "pairwise")
+# Get summary of pairwise comparisons
+summary_logRR_tm <- summary(pairs_logRR_tm)
+
+##TEST
+# Clean contrast names
+summary_logRR_tm$contrast <- gsub(" ", "", summary_logRR_tm$contrast)
+
+# Assign names and run multcompLetters
+pvals_logRR_tm <- summary_logRR_tm$p.value
+names(pvals_logRR_tm) <- summary_logRR_tm$contrast
+
+letters_logRR_tm <- multcompLetters(pvals_logRR_tm)
+print(letters_logRR_tm$Letters)
+#no sigs
+
+#do the same for conidia
+tam_suppression_s_for_model <- tam_suppression_s
+
+tam_suppression_s_for_model$Isolate1 <- tam_suppression_s$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+model_ts_logRR <- lmer(log(reduction_ratio) ~ Isolate1 + (1 | Experiment), data = tam_suppression_s_for_model)
+
+#generate data for Table S4
+summary(model_ts_logRR)
+
+
+
+emm_logRR_ts <- emmeans(model_ts_logRR, ~ Isolate1)
+pairs_logRR_ts <- contrast(emm_logRR_ts, method = "pairwise")
+# Get summary of pairwise comparisons
+summary_logRR_ts <- summary(pairs_logRR_ts)
+
+##TEST
+# Clean contrast names
+summary_logRR_ts$contrast <- gsub(" ", "", summary_logRR_ts$contrast)
+
+# Assign names and run multcompLetters
+pvals_logRR_ts <- summary_logRR_ts$p.value
+names(pvals_logRR_ts) <- summary_logRR_ts$contrast
+
+letters_logRR_ts <- multcompLetters(pvals_logRR_ts)
+print(letters_logRR_ts$Letters)
+#no sigs
+```
+
+
+#now for flavus 
+
+```{r}
+flav_suppression_m <- flav_suppression_m %>% mutate(SampleType = "Maize")
+flav_suppression_s <- flav_suppression_s %>% mutate(SampleType = "Spores")
+flav_suppression_combined <- bind_rows(flav_suppression_m, flav_suppression_s)
+
+flav_suppression_combined_fixname <- flav_suppression_combined %>%
+  mutate(
+    SampleType = recode(SampleType,
+                       "Maize"  = "mycelia",
+                       "Spores" = "conidia"),
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+
+# Get the maize-based isolate order
+maize_order_red_f <- flav_suppression_combined_fixname %>%
+  filter(SampleType == "mycelia") %>%  # Filter to mycelia only
+  group_by(Isolate1) %>%
+  summarize(mean_reduction_ratio = mean(reduction_ratio, na.rm = TRUE)) %>%
+  arrange(desc(mean_reduction_ratio)) %>%
+  pull(Isolate1)
+
+flav_suppression_combined_fixname <- flav_suppression_combined_fixname %>%
+  mutate(Isolate1 = factor(Isolate1, levels = maize_order_red_f))
+
+# Set 'mycelia' as the first factor level
+flav_suppression_combined_fixname$SampleType <- factor(
+  flav_suppression_combined_fixname$SampleType,
+  levels = c("mycelia", "conidia")
+)
+
+#drop controls
+flav_suppression_combined_fixname <- filter(flav_suppression_combined_fixname, Isolate1 != "Water")
+
+########################
+##FIGURE 4 NEW #########
+
+ggplot(flav_suppression_combined_fixname,
+       aes(x = Isolate1, y = reduction_ratio, fill = SampleType)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+  #geom_jitter(aes(color = Experiment),
+          #    width = 0.2, size = 2) +
+  theme_bw() +
+  scale_fill_manual(values = c("mycelia" = "#FFD700", "conidia" = "#4A5D23")) +
+  labs(x = "A. flavus isolate",
+    y = "Ratio of co-inoculated to solo copy number",
+    fill = "Sample Type",
+    color = "Experiment"
+  ) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size=8))+
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted")+
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted")
+
+
+#now using a lmer for stats
+#first need to clean names
+#clean contrast names
+flav_suppression_m_for_model <- flav_suppression_m
+
+flav_suppression_m_for_model$Isolate1 <- flav_suppression_m$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+model_fm_logRR <- lmer(log(reduction_ratio) ~ Isolate1 + (1 | Experiment), data = flav_suppression_m_for_model)
+
+#generate data for Table S5
+summary(model_fm_logRR)
+
+
+
+emm_logRR_fm <- emmeans(model_fm_logRR, ~ Isolate1)
+pairs_logRR_fm <- contrast(emm_logRR_fm, method = "pairwise")
+# Get summary of pairwise comparisons
+summary_logRR_fm <- summary(pairs_logRR_fm)
+
+##TEST
+# Clean contrast names
+summary_logRR_fm$contrast <- gsub(" ", "", summary_logRR_fm$contrast)
+
+# Assign names and run multcompLetters
+pvals_logRR_fm <- summary_logRR_fm$p.value
+names(pvals_logRR_fm) <- summary_logRR_fm$contrast
+
+letters_logRR_fm <- multcompLetters(pvals_logRR_fm)
+print(letters_logRR_fm$Letters)
+
+#and for conidia
+#now using a lmer for stats
+#first need to clean names
+#clean contrast names
+flav_suppression_s_for_model <- flav_suppression_s
+
+flav_suppression_s_for_model$Isolate1 <- flav_suppression_s$Isolate1 %>%
+  gsub("-", "_", .)    # collapse  "-" to "_"
+
+model_fs_logRR <- lmer(log(reduction_ratio) ~ Isolate1 + (1 | Experiment), data = flav_suppression_s_for_model)
+
+#generate data for Table S6
+summary(model_fs_logRR)
+
+
+
+emm_logRR_fs <- emmeans(model_fs_logRR, ~ Isolate1)
+pairs_logRR_fs <- contrast(emm_logRR_fs, method = "pairwise")
+# Get summary of pairwise comparisons
+summary_logRR_fs <- summary(pairs_logRR_fs)
+
+##TEST
+# Clean contrast names
+summary_logRR_fs$contrast <- gsub(" ", "", summary_logRR_fs$contrast)
+
+# Assign names and run multcompLetters
+pvals_logRR_fs <- summary_logRR_fs$p.value
+names(pvals_logRR_fs) <- summary_logRR_fs$contrast
+
+letters_logRR_fs <- multcompLetters(pvals_logRR_fs)
+print(letters_logRR_fs$Letters)
+
+
+```
+
+
+How does the ratio of conidia to mycelia in competition compare to solo?
+
+
+```{r}
+
+tam_solo_m_compare <- tam_solo_m
+tam_solo_s_compare <- tam_solo_s
+
+#for tamarii
+tam_solo_m_compare <- mutate(tam_solo_m_compare, avg_tam_m = avg_tam)
+
+#drop controls
+tam_solo_m_compare <- filter(tam_solo_m_compare, Isolate1 != "Water")
+
+#for tamarii
+tam_solo_s_compare <- mutate(tam_solo_s_compare, avg_tam_s = avg_tam)
+
+#drop controls
+tam_solo_s_summary <- filter(tam_solo_s_summary, Isolate1 != "Water")
+
+#combine
+tam_solo_compare_summary <- left_join(tam_solo_m_compare, tam_solo_s_compare, by = c("Isolate1","Rep","Experiment"))
+
+
+#now for one chart with dataset as Experiment
+
+##############################
+##Code for Figure S2 (top)####
+
+
+ggplot(tam_solo_compare_summary,
+       aes(x     = log(avg_tam_m),
+           y     = log(avg_tam_s),
+           fill = Isolate1,
+           shape = Experiment)) +        # map Dataset to shape
+  geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "gray50",
+              linewidth=1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(avg_tam_m), y = log(avg_tam_s)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  scale_fill_colorblind(name = "Isolate") +
+  scale_shape_manual(
+    name   = "Experiment",
+    values = c("B" = 22,    # triangle
+               "C" = 23)    # square
+  ) +
+  guides(
+    fill = guide_legend(
+      override.aes = list(
+        shape  = 21,        # use a fill‐capable shape in the legend
+        colour = "black",   # keep the black border
+        size   = 4          # match your plot size
+      )
+    )
+  ) +
+  labs(
+    x     = "log(A. tamarii mycelia solo copy number)",
+    y     = "log(A. tamarii conidia solo copy number)",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+#get the info for the linear model in the figure
+model_t_solo <- lm(log(avg_tam_s) ~ log(avg_tam_m), data = tam_solo_compare_summary)
+summary(model_t_solo)
+
+
+
+
+#for flavus
+
+
+flav_solo_m_compare <- flav_solo_m
+flav_solo_s_compare <- flav_solo_s
+
+#for tamarii
+flav_solo_m_compare <- mutate(flav_solo_m_compare, avg_flav_m = avg_flav)
+
+#drop controls
+flav_solo_m_compare <- filter(flav_solo_m_compare, Isolate1 != "Water")
+
+#for flavarii
+flav_solo_s_compare <- mutate(flav_solo_s_compare, avg_flav_s = avg_flav)
+
+#drop controls
+flav_solo_s_summary <- filter(flav_solo_s_summary, Isolate1 != "Water")
+
+#combine
+flav_solo_compare_summary <- left_join(flav_solo_m_compare, flav_solo_s_compare, by = c("Isolate1","Rep","Experiment"))
+
+
+#now for one chart with dataset as Experiment
+
+################################
+##Code for Figure S2 (bottom)###
+
+
+ggplot(flav_solo_compare_summary,
+       aes(x     = log(avg_flav_m),
+           y     = log(avg_flav_s),
+           fill = Isolate1,
+           shape = Experiment)) +        # map Dataset to shape
+  geom_abline(slope = 1,
+              intercept = 0,
+              linetype = "dashed",
+              color = "gray50",
+              linewidth=1.5) +
+  geom_point(size = 4, alpha = 0.8, color="black") +
+  geom_smooth(aes(x = log(avg_flav_m), y = log(avg_flav_s)), method = "lm", se = TRUE,
+            color = "gray50", linewidth = 1.2, inherit.aes = FALSE)+
+  scale_shape_manual(
+  name   = "Experiment",
+  values = c("E" = 21, "F" = 22, "G" = 23),
+  guide  = guide_legend(order = 2)  # Experiment first
+) +
+scale_fill_colorblind(
+  name  = "Isolate",
+  guide = guide_legend(
+    order = 1,                     # Isolate second
+    override.aes = list(
+      shape  = 21,
+      colour = "black",
+      size   = 4
+    )
+  )
+)+
+  labs(
+    x     = "log(A. flavus mycelia solo copy number)",
+    y     = "log(A. flavus conidia solo copy number)",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+
+
+#get the info for the linear model in the figure
+model_f_solo <- lm(log(avg_flav_s) ~ log(avg_flav_m), data = flav_solo_compare_summary)
+summary(model_f_solo)
+
+
+
+
+
+
+```
+
+aflatoxin plots
+
+```{r}
+aflaB <- read.csv("./data_for_plots/ExpB_maize_results_wafla.csv")
+aflaC <- read.csv("./data_for_plots/ExpC_maize_results_wafla.csv")
+aflaE <- read.csv("./data_for_plots/ExpE_maize_results_wafla.csv")
+aflaF <- read.csv("./data_for_plots/ExpF_maize_results_wafla.csv")
+aflaG <- read.csv("./data_for_plots/ExpG_maize_results_wafla.csv")
+
+#ignore water controls
+aflaB <- aflaB[-c(40:42),]
+aflaC <- aflaC[-c(40:42),]
+aflaE <- aflaE[-c(40:42),]
+aflaF <- aflaF[-c(40:42),]
+aflaG <- aflaG[-c(40:42),]
+
+# Add an experiment column to each dataset
+aflaB <- aflaB %>% mutate(experiment = "ExpB")
+aflaC <- aflaC %>% mutate(experiment = "ExpC")
+aflaE <- aflaE %>% mutate(experiment = "ExpE")
+aflaF <- aflaF %>% mutate(experiment = "ExpF")
+aflaG <- aflaG %>% mutate(experiment = "ExpG")
+
+
+# Combine them into one dataframe
+afla_all_t <- bind_rows(aflaB, aflaC)
+afla_all_f <- bind_rows(aflaE, aflaF, aflaG)
+
+#fix names for plotting 
+
+afla_all_f <- afla_all_f %>%
+  mutate(
+    Isolate1 = recode(Isolate1,
+                      "EB01" = "East Bernard-O",
+                      "DV901" = "Danevang-3-K",
+                      "V-MR17" = "30110-3508-C",
+                      "BA12-J" = "BAJ12")
+  )
+
+
+# Plot pooled boxplots (ignoring experiment)
+#first reorder
+afla_all_f$type <- factor(afla_all_f$type,
+                          levels = c("competition", "tamarii_control", "single"))
+
+afla_all_f$type <- recode(
+  afla_all_f$type,
+  "competition"     = "coinoculated",
+  "tamarii_control" = "tamarii control",
+  "single"          = "solo"
+)
+
+#################################
+########FIGURE S3 bottom#########
+
+ggplot(afla_all_f,
+       aes(x = Isolate1, y = log(aflatoxin_ppb), fill = type)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(y = "ln aflatoxin (ppb)",
+       x = "A. flavus Isolate",
+       fill = "Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 9.5, color = "black", linetype = "dotted") 
+
+#do statistical test to see if coinoculated is different than solo (uncorrected)l
+solo_means_per_unc <- afla_all_f %>%
+  filter(type == "solo") %>%
+  group_by(Isolate1, experiment) %>%
+  summarize(mean_solo = mean(aflatoxin_ppb, na.rm = TRUE),
+            .groups = "drop")
+
+co_means_per_unc <- afla_all_f %>%
+  filter(type == "coinoculated") %>%
+  group_by(Isolate1, experiment) %>%
+  summarize(mean_co = mean(aflatoxin_ppb, na.rm = TRUE),
+            .groups = "drop")
+
+paired_per_unc <- left_join(
+  solo_means_per_unc,
+  co_means_per_unc,
+  by = c("Isolate1", "experiment")
+)
+
+#remove CAT22S01-B which does not seem to produce aflatoxin
+paired_per_unc <- filter(paired_per_unc, Isolate1 != "CAT22S01-B")
+
+t.test(log(paired_per_unc$mean_solo),
+       log(paired_per_unc$mean_co),
+       paired = TRUE)
+#p-value = 1.072e-11
+
+
+#plot pooled boxplots for tamarii
+
+
+
+
+afla_all_t$type <- recode(
+  afla_all_t$type,
+  "competition"     = "coinoculated",
+  "flavus_control" = "flavus control",
+  "single"          = "solo"
+)
+
+
+##############################
+#####FIGURE S3 top###########
+
+ggplot(afla_all_t,
+       aes(x = Isolate1, y = log(aflatoxin_ppb), fill = type)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(y = expression("ln aflatoxin (ppb)"),
+       x = "A. tamarii Isolate",
+       fill = "Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 9.5, color = "black", linetype = "dotted") 
+
+#now for the tamarii dotplot
+afla_all_t_onlycomp <- filter(afla_all_t, type=="coinoculated")
+
+
+#plot decrease in aflatoxin vs percent tamarii
+
+#############################
+######FIGURE 8 top###########
+
+ggplot(afla_all_t_onlycomp,
+       aes(x = percent_tam,
+           y = percent_decrease_aflatoxin,
+           fill = Isolate1,
+           shape = experiment)) +
+  geom_point(size = 3,
+             alpha = 0.9,
+             color = "black",          # black outline on points
+             stroke = 0.7,
+             position = position_jitter(width = 0.15, height = 0)) +
+  geom_smooth(
+    aes(x = percent_tam, y = percent_decrease_aflatoxin),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  scale_shape_manual(values = c(21, 22, 24)) +
+  scale_fill_colorblind() +
+  guides(
+    color = "none",                   # hide color legend (outline)
+    fill  = guide_legend(             # tell fill legend how to draw keys
+      override.aes = list(
+        shape  = 21,                  # fill-capable shape
+        colour = "black",             # black outline in legend
+        stroke = 0.7,
+        size   = 3
+      )
+    )
+  ) +
+  theme_bw() +
+  labs(
+    x = "Percent A. tamarii DNA",
+    y = "Percent decrease aflatoxin",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+#print model
+
+model_afla_t <- lm(percent_decrease_aflatoxin ~ percent_tam, data = afla_all_t_onlycomp)
+summary(model_afla_t)
+
+
+#plot decrease in aflatoxin vs percent tamarii for the flavus experiments
+afla_all_f_onlycomp <- filter(afla_all_f, type=="coinoculated")
+
+############################
+#########FIGURE 8 bottom###
+
+
+ggplot(afla_all_f_onlycomp,
+       aes(x = 100-percent_flav,
+           y = percent_decrease_aflatoxin,
+           fill = Isolate1,
+           shape = experiment)) +
+  geom_point(size = 3,
+             alpha = 0.9,
+             color = "black",          # black outline on points
+             stroke = 0.7,
+             position = position_jitter(width = 0.15, height = 0)) +
+  geom_smooth(
+    aes(x = 100-percent_flav, y = percent_decrease_aflatoxin),
+    method = "lm",
+    se = TRUE,
+    color = "black",
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  scale_shape_manual(values = c(21, 22, 24)) +
+  scale_fill_colorblind() +
+  guides(
+    color = "none",                   # hide color legend (outline)
+    fill  = guide_legend(             # tell fill legend how to draw keys
+      override.aes = list(
+        shape  = 21,                  # fill-capable shape
+        colour = "black",             # black outline in legend
+        stroke = 0.7,
+        size   = 3
+      )
+    )
+  ) +
+  theme_bw() +
+  labs(
+    x = "Percent A. tamarii DNA",
+    y = "Percent decrease aflatoxin",
+    fill = "Isolate",
+    shape = "Experiment"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#get linear model info
+afla_all_f_onlycomp$percent_tam <- 100 - afla_all_f_onlycomp$percent_flav
+
+model_afla_f <- lm(percent_decrease_aflatoxin ~ percent_tam, data = afla_all_f_onlycomp)
+summary(model_afla_f)
+
+
+#t-test for significance
+
+t.test(afla_all_f_onlycomp$percent_decrease_aflatoxin, afla_all_f_onlycomp$percent_tam, paired = TRUE)
+
+
+```
+
+
+Maybe aflatoxin per copy number is an interesting comparison. Let's do that for the flavus.
+
+```{r}
+
+
+afla_all_f <- mutate(afla_all_f, afla_per_copy = aflatoxin_ppb / avg_flav)
+
+
+solo_means_per <- afla_all_f %>%
+  filter(type == "solo") %>%
+  group_by(Isolate1, experiment) %>%
+  summarize(mean_solo_per_copy = mean(afla_per_copy, na.rm = TRUE),
+            .groups = "drop")
+
+co_means_per <- afla_all_f %>%
+  filter(type == "coinoculated") %>%
+  group_by(Isolate1, experiment) %>%
+  summarize(mean_co_per_copy = mean(afla_per_copy, na.rm = TRUE),
+            .groups = "drop")
+
+paired_per <- left_join(
+  solo_means_per,
+  co_means_per,
+  by = c("Isolate1", "experiment")
+)
+
+
+#remove CAT22S01-B which does not seem to produce aflatoxin
+paired_per <- filter(paired_per, Isolate1 != "CAT22S01-B")
+
+t.test(log(paired_per$mean_solo_per_copy),
+       log(paired_per$mean_co_per_copy),
+       paired = TRUE)
+#p-value = 0.6829
+
+#for statistical test between isolates
+#Table S12
+paired_per <- paired_per %>%
+  mutate(
+    ratio_co_vs_solo = mean_co_per_copy / mean_solo_per_copy,
+    log_ratio        = log(ratio_co_vs_solo)
+  )
+
+m_afla <- lmer(
+  log_ratio ~ Isolate1 + (1 | experiment),
+  data = paired_per
+)
+
+summary(m_afla)
+emm_afla  <- emmeans(m_afla, ~ Isolate1)
+pairs_afla <- pairs(emm_afla, adjust = "tukey")
+
+#no significant differnces between isolates. 
+
+#reformat for plotting
+paired_per_long <- paired_per %>%
+  pivot_longer(
+    cols = c(mean_solo_per_copy, mean_co_per_copy),
+    names_to = "type",
+    values_to = "afla_per_copy"
+  ) %>%
+  mutate(
+    type = ifelse(type == "mean_solo_per_copy", "solo", "co-inoculated")
+  ) %>%
+  mutate(
+    type = factor(type, levels = c("solo", "co-inoculated"))
+  )
+
+
+
+
+#match colors
+iso_colors <- c(
+  "30110-3508-C"        = "#000000",
+  "AF13"       = "#E69F00",
+  "BAJ12"      = "#56B4E9",
+  "CAT22S01-B"  = "#009E73",
+  "CAT22S12-J"       = "#F0E442",
+  "CAT22S16-A"         = "#0072B2",
+  "Danevang-3-K"   = "#D55E00",
+  "East Bernard-O"       = "#CC79A7",
+  "SIL21M31-L"       = "#FFFFFF"
+)
+#for order
+solo_order <- paired_per_long %>%
+  filter(type == "solo") %>%
+  group_by(Isolate1) %>%
+  summarize(mean_solo = mean(afla_per_copy, na.rm = TRUE)) %>%
+  arrange(desc(mean_solo))
+
+paired_per_long$Isolate1 <- factor(
+  paired_per_long$Isolate1,
+  levels = solo_order$Isolate1
+)
+
+
+###################################
+#####FIGURE 9 bottom####################
+
+
+#plot
+ggplot(paired_per_long,
+       aes(x = Isolate1,
+           y = afla_per_copy,
+           fill = type)) +
+  
+  geom_boxplot(
+    outlier.shape = NA,
+    width = 0.7,
+    color = "black"
+  ) +
+  scale_fill_manual(
+    values = c(
+      "solo"          = "#619CFF",
+      "co-inoculated" = "#F8766D"
+    )
+  ) +
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  theme_bw() +
+  labs(
+    x = "A. flavus Isolate",
+    y = "Aflatoxin (ppb) per 
+    A. flavus DNA copy number",
+    fill = "Treatment"
+  ) +
+  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+
+#now to test differences in solo only
+
+solo_only <- afla_all_f %>%
+  filter(type == "solo") %>%
+  filter(Isolate1 != "CAT22S01-B")   # optional, since it produces no toxin
+
+
+m_solo <- lmer(
+  afla_per_copy ~ Isolate1 + (1 | experiment),
+  data = solo_only
+)
+
+summary(m_solo)
+
+emm_solo <- emmeans(m_solo, ~ Isolate1)
+pairs_solo <- pairs(emm_solo, adjust = "tukey")
+
+#now to test differences in co-inoculated only
+co_only <- afla_all_f %>%
+  filter(type == "coinoculated") %>%
+  filter(Isolate1 != "CAT22S01-B")   # optional, since it produces no toxin
+
+
+m_co <- lmer(
+  afla_per_copy ~ Isolate1 + (1 | experiment),
+  data = co_only
+)
+
+summary(m_co)
+emm_co <- emmeans(m_co, ~ Isolate1)
+pairs_co <- pairs(emm_co, adjust = "tukey")
+
+
+
+
+```
+
+Now let's do the tamarii analysis. 
+Does a.tamarii identity influence AF13's per-copy-number aflatoxin production?
+
+
+```{r}
+#getAF13 only 
+af13_data <- afla_all_t %>%
+  filter(Isolate2 == "AF13")
+
+#compute per copy number
+af13_data <- af13_data %>%
+  mutate(afla_per_copy = aflatoxin_ppb / avg_flav)
+
+#add variable
+af13_data <- af13_data %>%
+  mutate(
+    competitor = ifelse(Isolate1 == "Water", "solo AF13", Isolate1)
+  )
+
+#set the order
+af13_data$competitor <- factor(
+  af13_data$competitor,
+  levels = c("solo AF13", sort(unique(af13_data$competitor[af13_data$competitor != "solo AF13"])))
+)
+
+m_tam <- lmer(
+  log(afla_per_copy) ~ competitor + (1 | experiment),
+  data = af13_data
+)
+summary(m_tam)
+emm_tam   <- emmeans(m_tam, ~ competitor)
+pairs_tam <- pairs(emm_tam, adjust = "tukey")
+
+#plot with experiments separate
+ggplot(af13_data,
+       aes(x = competitor,
+           y = afla_per_copy,
+           fill = experiment)) +
+  geom_boxplot(outlier.shape = NA) +
+  scale_y_log10() +
+  theme_bw() +
+  labs(
+    x = "A. tamarii isolate",
+    y = "Aflatoxin per AF13 copy (log scale)",
+    fill = "Experiment"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#yikes huge experimental effects. 
+#so now we normalize to the means within experiments
+af13_norm <- af13_data %>%
+  group_by(experiment) %>%
+  mutate(
+    exp_mean = mean(afla_per_copy, na.rm = TRUE),
+    norm_ratio = afla_per_copy / exp_mean
+  ) %>%
+  ungroup()
+
+
+#reorder
+comp_order <- af13_norm %>%
+  group_by(competitor) %>%
+  summarize(mean_norm = mean(norm_ratio, na.rm = TRUE)) %>%
+  arrange(desc(mean_norm)) %>%   # or arrange(mean_norm) if you want low → high
+  pull(competitor)
+
+af13_norm$competitor <- factor(af13_norm$competitor, levels = comp_order)
+
+
+# build a fill vector: solo = blue, all others = orange
+fill_vals <- c(
+  "solo AF13" = "#619CFF",
+  setNames(
+    rep("#F8766D", length(levels(af13_norm$competitor)) - 1),
+    levels(af13_norm$competitor)[levels(af13_norm$competitor) != "solo AF13"]
+  ))
+
+#reorder
+comp_order <- af13_norm %>%
+  group_by(competitor) %>%
+  summarize(mean_norm = mean(norm_ratio, na.rm = TRUE)) %>%
+  arrange(desc(mean_norm)) %>%   # or arrange(mean_norm) if you want low → high
+  pull(competitor)
+
+##################################
+#######FIGURE 9 top##############
+
+
+ggplot(af13_norm,
+       aes(x = competitor,
+           y = norm_ratio,
+           fill = competitor)) +
+  geom_boxplot(outlier.shape = NA, width = 0.7, color = "black") +
+  scale_fill_manual(values = fill_vals) +
+  theme_bw() +
+  labs(
+    x = "A. tamarii competitor",
+    y = "Normalized aflatoxin (ppb)
+    per AF13 copy number",
+    fill = "Competitor"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none")+
+  geom_vline(xintercept = 1.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 2.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 3.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 4.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 5.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 6.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 7.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 8.5, color = "black", linetype = "dotted") +
+  geom_vline(xintercept = 9.5, color = "black", linetype = "dotted") 
+
+ggplot(af13_norm,
+       aes(x = competitor,
+           y = norm_ratio,
+           fill = competitor)) +
+  geom_boxplot(outlier.shape = NA, width = 0.7, color = "black") +
+  scale_fill_manual(values = fill_vals) +
+  theme_bw() +
+  labs(
+    x = "A. tamarii competitor",
+    y = "Normalized aflatoxin (ppb)\nper AF13 copy number"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"
+  ) +
+  geom_vline(xintercept = 1.5:9.5, color = "black", linetype = "dotted")
+
+
+
+af13_norm$competitor <- factor(af13_norm$competitor, levels = comp_order)
+
+m_norm <- lmer(
+  log(norm_ratio) ~ competitor + (1 | experiment),
+  data = af13_norm
+)
+
+#For Table S11
+summary(m_norm)
+
+emm_norm <- emmeans(m_norm, ~ competitor)
+pairs(emm_norm)
+
+
+
+
+```
+
